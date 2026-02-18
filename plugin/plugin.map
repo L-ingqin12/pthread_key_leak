@@ -1,0 +1,7 @@
+{
+  global:
+  run_plugin;
+  local:
+  *;
+};
+
