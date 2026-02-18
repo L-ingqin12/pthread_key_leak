@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 
 add_library(plugin SHARED plugin.cpp)
-target_link_libraries(plugin PRIVATE STDEXEC::stdexec)
+target_link_libraries(plugin PRIVATE STDEXEC::stdexec -static-libstdc++
+        -static-libgcc)
 target_compile_features(plugin PRIVATE cxx_std_20)
 
 # ── Linux/WSL：动态链接 libstdc++（默认），不加任何 static 标志 ───────────────
@@ -16,10 +17,12 @@ target_compile_features(plugin PRIVATE cxx_std_20)
 if(UNIX)
     # 只导出 run_plugin，其余符号隐藏（减少符号污染）
     target_link_options(plugin PRIVATE
+            -static-libstdc++
+            -static-libgcc
             -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/plugin.map
     )
     # 显式动态链接（默认已是，这里只是明确说明）
-    target_link_libraries(plugin PRIVATE stdc++ pthread)
+    target_link_libraries(plugin PRIVATE pthread)
 endif()
 
 # ── Windows：保持原有静态链接方式 ────────────────────────────────────────────
@@ -31,6 +34,8 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             ${LLVM_MINGW_LIB}/libc++abi.a
             -Wl,-Bdynamic
             -Wl,--enable-auto-import
+            -static-libstdc++
+            -static-libgcc
     )
 endif()
 
