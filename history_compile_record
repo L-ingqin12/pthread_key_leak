@@ -1,0 +1,502 @@
+  204  echo "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-14 main"     >> /etc/apt/sources.list.d/llvm-12.list
+  205  apt-get update
+  206  apt-get install -y clang-14 libc++-14-dev libc++abi-14-dev lld-14
+  207  # 验证
+  208  find /usr/lib/llvm-14/include/c++/v1 -name "source_location" 2>/dev/null
+  209  clang++-14     -stdlib=libc++ -std=c++20     -nostdinc++     -I/usr/lib/llvm-14/include/c++/v1     -L/usr/lib/llvm-14/lib     -Wl,-rpath,/usr/lib/llvm-14/lib     -x c++ - <<< '#include <source_location>
+  210  int main(){}' && echo "✓ libc++ 14 OK"
+  211  # 验证 GCC 10 的实验性 source_location 可用
+  212  g++ -std=c++20 -x c++ - <<< '#include <experimental/source_location>
+  213  int main(){}' && echo "✓ OK"
+  214  # 找到 stdexec 里 include source_location 的文件
+  215  grep -rn "source_location"   /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/   | grep "#include"
+  216  find /usr/lib/llvm-14/include/c++/v1 -type f | head -20
+  217  find /usr/include /usr/lib/llvm-12 -name "source_location" 2>/dev/null
+  218  find /usr -name "source_location" 2>/dev/null
+  219  # 备份原文件
+  220  cp /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__meta.hpp    /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__meta.hpp.bak
+  221  # patch：替换 include 路径，同时兼容两种情况
+  222  sed -i 's|#include <source_location>|#if __has_include(<source_location>)\n#include <source_location>\n#elif __has_include(<experimental/source_location>)\n#include <experimental/source_location>\nnamespace std { using source_location = std::experimental::source_location; }\n#endif|'   /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__meta.hpp
+  223  # 验证 patch 结果
+  224  head -30 /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__meta.hpp
+  225  rm -rf /mnt/d/CLionProjects/pthread_key_leak/build/
+  226  cd /mnt/d/CLionProjects/pthread_key_leak
+  227  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++     -DCMAKE_C_COMPILER=/usr/bin/gcc && cmake --build build -j$(nproc)
+  228  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++     -DCMAKE_C_COMPILER=/usr/bin/gcc     -DCMAKE_VERBOSE_MAKEFILE=ON && cmake --build build -j1 2>&1 | grep "plugin.cpp.o" | head -3
+  229  head -30 /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__config.hpp
+  230  sed -i 's/#if __cplusplus < 2020'\''02L/#if __cplusplus < 201709L/'   /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__config.hpp
+  231  # 验证
+  232  head -15 /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__config.hpp
+  233  head -20 /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__config.hpp
+  234  rm -rf /mnt/d/CLionProjects/pthread_key_leak/build/
+  235  cd /mnt/d/CLionProjects/pthread_key_leak
+  236  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++     -DCMAKE_C_COMPILER=/usr/bin/gcc && cmake --build build -j$(nproc)
+  237  # 备份当前源
+  238  cp /etc/apt/sources.list /etc/apt/sources.list.bak
+  239  # 替换为 bookworm 源
+  240  cat > /etc/apt/sources.list << 'EOF'
+  241  deb http://mirrors.tuna.tsinghua.edu.cn/debian bookworm main contrib non-free non-free-firmware
+  242  deb http://mirrors.tuna.tsinghua.edu.cn/debian bookworm-updates main contrib non-free non-free-firmware
+  243  deb http://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware
+  244  EOF
+  245  # 删掉所有第三方源（避免冲突）
+  246  rm -f /etc/apt/sources.list.d/*.list
+  247  # 升级
+  248  apt-get update
+  249  apt-get dist-upgrade -y
+  250  # 完成后验证
+  251  gcc --version    # 应显示 12.x
+  252  g++ --version
+  253  gcc --version    # 应显示 12.x
+  254  # 还原 stdexec 的 patch（bookworm GCC 12 不需要这些 patch）
+  255  cd /mnt/d/CLionProjects/pthread_key_leak
+  256  cp third_party/stdexec/include/stdexec/__detail/__meta.hpp.bak    third_party/stdexec/include/stdexec/__detail/__meta.hpp
+  257  # 还原 __config.hpp
+  258  git -C third_party/stdexec checkout include/stdexec/__detail/__config.hpp
+  259  # 重新构建
+  260  rm -rf build/
+  261  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  262  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++     -DCMAKE_C_COMPILER=/usr/bin/gcc && cmake --build build -j$(nproc)
+  263  # 升级
+  264  apt-get update
+  265  apt-get dist-upgrade -y
+  266  apt-get upgrade -y
+  267  apt-get update && apt-get dist-upgrade -y
+  268  # 导入 bookworm 的 GPG key
+  269  apt-get install -y debian-keyring debian-archive-keyring
+  270  apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 6ED0E7B82643E131 78DBA3BC47EF2265 F8D2585B8783D481
+  271  # 或者直接从清华镜像拿
+  272  curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2023.3+deb12u1_all.deb     -o /tmp/keyring.deb && dpkg -i /tmp/keyring.deb
+  273  # 重新更新
+  274  apt-get update && apt-get dist-upgrade -y
+  275  gcc --version    # 应显示 12.x
+  276  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++     -DCMAKE_C_COMPILER=/usr/bin/gcc && cmake --build build -j$(nproc)
+  277  ls
+  278  rm -rf build/
+  279  # 还原 stdexec 的 patch（bookworm GCC 12 不需要这些 patch）
+  280  cd /mnt/d/CLionProjects/pthread_key_leak
+  281  cp third_party/stdexec/include/stdexec/__detail/__meta.hpp.bak    third_party/stdexec/include/stdexec/__detail/__meta.hpp
+  282  # 还原 __config.hpp
+  283  git -C third_party/stdexec checkout include/stdexec/__detail/__config.hpp
+  284  # 重新构建
+  285  rm -rf build/
+  286  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  287  git --version
+  288  # 方法1：强制信任，完成升级
+  289  apt-get update --allow-insecure-repositories
+  290  apt-get dist-upgrade -y --allow-unauthenticated
+  291  apt-get install -y git g++-12 gcc-12 cmake ninja-build
+  292  gcc-12 --version
+  293  git -C third_party/stdexec checkout include/stdexec/__detail/__config.hpp
+  294  cp third_party/stdexec/include/stdexec/__detail/__meta.hpp.bak    third_party/stdexec/include/stdexec/__detail/__meta.hpp
+  295  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  296  # 查看当前 cmake 指向哪里
+  297  which cmake
+  298  cmake --version
+  299  # 修复：重新建正确的软链接
+  300  ln -sf /opt/cmake-3.29.3/bin/cmake /usr/local/bin/cmake
+  301  ln -sf /opt/cmake-3.29.3/bin/ctest /usr/local/bin/ctest
+  302  # 或者直接用系统升级后自带的 cmake
+  303  apt-get install -y cmake
+  304  cmake --version
+  305  ln -sf /opt/cmake-3.29.3/bin/cmake /usr/local/bin/cmake
+  306  cmake --version
+  307  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  308  ls -al
+  309  cmake --version
+  310  which cmake
+  311  cmake --version
+  312  ls -al
+  313  bash cmake-3.29.3-linux-x86_64.sh --prefix=/usr/local --skip-license --exclude-subdir
+  314  cmake --version
+  315  ln -sf /opt/cmake-3.29.3/bin/cmake /usr/local/bin/cmake
+  316  ln -sf /opt/cmake-3.29.3/bin/ctest /usr/local/bin/ctest
+  317  ln -sf /opt/cmake-3.29.3/bin/cpack /usr/local/bin/cpack
+  318  cmake --version
+  319  # 删掉所有自定义软链接
+  320  rm -f /usr/local/bin/cmake /usr/local/bin/ctest /usr/local/bin/cpack
+  321  rm -f /usr/bin/cmake
+  322  # 用系统 apt 的 cmake
+  323  apt-get install --reinstall -y cmake
+  324  # 验证
+  325  hash -r
+  326  cmake --version   # 应该显示 3.25.1，且不报错
+  327  cmake --version   # 应该显示 3.25.1，且不报错
+  328  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  329  cd build/bin/
+  330  ls
+  331  ./leak_checker 
+  332  # 查看 libstdc++ 版本
+  333  g++-12 --version
+  334  ldd /mnt/d/CLionProjects/pthread_key_leak/build/bin/libleak_plugin.so | grep stdc++
+  335  strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 | grep "GLIBCXX_" | tail -5
+  336  # 用 strace 直接观察 pthread_key_create / pthread_key_delete 调用
+  337  strace -e trace=pthread_key_create,pthread_key_delete     /mnt/d/CLionProjects/pthread_key_leak/build/bin/leak_checker     /mnt/d/CLionProjects/pthread_key_leak/build/bin/libleak_plugin.so 5 8 2>&1     | grep -E "pthread_key"
+  338  # 确认静态 libc++ 库存在
+  339  ls /usr/lib/llvm-12/lib/libc++.a
+  340  ls /usr/lib/x86_64-linux-gnu/libc++.a
+  341  cd -
+  342  strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 | grep "GLIBCXX_" | tail -5
+  343  rm -rf build/
+  344  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  345  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/clang++-12     -DCMAKE_C_COMPILER=/usr/bin/clang-12 && cmake --build build -j$(nproc)
+  346  rm -rf build/
+  347  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/clang++-12     -DCMAKE_C_COMPILER=/usr/bin/clang-12 && cmake --build build -j$(nproc)
+  348  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  349  rm -rf build/
+  350  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  351  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  352  grep -R "CMAKE_CXX_COMPILER" build/CMakeCache.txt
+  353  grep -R "stdlib=libc++" build
+  354  grep -R "stdlib=libc++" build --color
+  355  rm -rf build/
+  356  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  357  rm -rf build/
+  358  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  359  rm -rf build/
+  360  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  361  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  362  rm -rf build/
+  363  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  364  rm -rf build/
+  365  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  366  git init
+  367  git add .
+  368  git status
+  369  git add  CMakeLists.txt CPM.cmake  main/ plugin  third_party/ throw.cpp main.cpp
+  370  git status
+  371  git add leak.cpp 
+  372  git add clean.cpp 
+  373  git commit -m "claude"
+  374  rm -rf build/
+  375  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  376  rm -rf build/
+  377  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  378  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  379  cd build/bin/
+  380  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  381  ./leak_checker 
+  382  git status
+  383  cd -
+  384  git status
+  385  git add main/CMakeLists.txt  plugin/CMakeLists.txt
+  386  git commit -m "shared version"
+  387  # 下载 Debian bullseye 的 libstdc++6 包
+  388  cd /tmp
+  389  apt-get download libstdc++6=10.2.1-6   # bullseye 版本号
+  390  # 或者从清华镜像直接 wget
+  391  wget "http://mirrors.tuna.tsinghua.edu.cn/debian/pool/main/g/gcc-10/libstdc++6_10.2.1-6_amd64.deb"
+  392  # 解压出 .so 文件（不安装）
+  393  dpkg-deb -x libstdc++6_10.2.1-6_amd64.deb /tmp/oldstdc/
+  394  ls /tmp/oldstdc/usr/lib/x86_64-linux-gnu/libstdc++.so.6*
+  395  # plugin 需要用旧版头文件编译才能触发泄漏路径
+  396  # 最简单：直接用旧 .so 跑已有的 plugin
+  397  LD_PRELOAD=/tmp/oldstdc/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.28     ./build/bin/leak_checker     ./build/bin/libleak_plugin.so     200 8
+  398  cd -
+  399  LD_PRELOAD=/tmp/oldstdc/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.28     ./build/bin/leak_checker     ./build/bin/libleak_plugin.so     200 8
+  400  rm -rf build/
+  401  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  402  LD_PRELOAD=/tmp/oldstdc/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.28     ./build/bin/leak_checker     ./build/bin/libleak_plugin.so     200 8
+  403  ./build/bin/leak_checker
+  404  echo $LD_PRELOAD
+  405  ./build/bin/leak_checker
+  406  cd build/bin/
+  407  ./leak_checker
+  408  ldd libleak_plugin.so
+  409  cd -
+  410  rm -rf build/
+  411  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  412  cd -
+  413  ldd libleak_plugin.so
+  414  ./leak_checker
+  415  ldd libleak_plugin.so
+  416  cd -
+  417  rm -rf build/
+  418  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  419  make VERBOSE=1
+  420  # 或
+  421  ninja -v
+  422  cd -
+  423  ldd libleak_plugin.so
+  424  cd -
+  425  rm -rf build/
+  426  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  427  cd -
+  428  ldd libleak_plugin.so
+  429  ./leak_checker
+  430  cd -
+  431  git status
+  432  git add plugin/
+  433  git commit -m "static libstd"
+  434  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  435  cd -
+  436  ./leak_checker
+  437  nm -D libleak_plugin.so 
+  438  git status
+  439  cd -
+  440  git reset --hard HEAD
+  441  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  442  cd -
+  443  ./leak_checker
+  444  cd -
+  445  clear
+  446  git reset --hard HEAD
+  447  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build build -j$(nproc)
+  448  cd -
+  449  ./leak_checker
+  450  nm -D libleak_plugin.so 
+  451  nm -D leak_checker 
+  452  git status
+  453  git add ../../main/main.cpp
+  454  git commit -m "clion"
+  455  git log
+  456  git reset --hard 2c812c271d5c4d72bd3f5d696b09c69a82658999
+  457  cd -
+  458  rm -rf build/
+  459  cmake -B build/     -DCMAKE_CXX_COMPILER=/usr/bin/clang++-12     -DCMAKE_C_COMPILER=/usr/bin/clang-12 && cmake --build build -j$(nproc)
+  460  ls /usr/bin/clang* /usr/bin/g++* /usr/bin/gcc* 2>/dev/null
+  461  which clang++ g++
+  462  rm -rf /mnt/d/CLionProjects/pthread_key_leak/build/
+  463  cmake -B /mnt/d/CLionProjects/pthread_key_leak/build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build /mnt/d/CLionProjects/pthread_key_leak/build/ -j$(nproc)
+  464  cmake -B /mnt/d/CLionProjects/pthread_key_leak/build/     -DCMAKE_CXX_COMPILER=/usr/bin/g++-12     -DCMAKE_C_COMPILER=/usr/bin/gcc-12 && cmake --build /mnt/d/CLionProjects/pthread_key_leak/build/ -j$(nproc)
+  465  cd -
+  466  ./leak_checker ./libleak_plugin.so 200 8
+  467  export LANG=en_US.UTF-8
+  468  export LC_ALL=en_US.UTF-8
+  469  # 检查 plugin.so 的依赖，如果有 libstdc++.so 说明没有静态嵌入
+  470  ldd /mnt/d/CLionProjects/pthread_key_leak/build/bin/libleak_plugin.so
+  471  # 检查符号是否被隐藏
+  472  nm -D /mnt/d/CLionProjects/pthread_key_leak/build/bin/libleak_plugin.so     | grep -i "cxa\|thread_specific\|pthread_key" | head -20
+  473  cd -
+  474  rm -rf build/
+  475  cmake -B build/ -DCMAKE_CXX_COMPILER=/usr/bin/g++-12 && cmake --build build -j$(nproc)
+  476  cd -
+  477  ./leak_checker ./libleak_plugin.so 200 8
+  478   nm -D libleak_plugin.so | grep cxa
+  479   nm -D libleak_plugin.so | grep pthread
+  480  strace -e trace=pthread_key_create,pthread_key_delete     ./leak_checker ./libleak_plugin.so 3 2 2>&1 | grep pthread_key
+  481  docker --version 2>/dev/null || echo "no docker"
+  482  cd -
+  483  cd ../
+  484  cd ../Document/
+  485  ls
+  486  cd Download/
+  487  ls
+  488   unzip commandline-tools-linux-x64-5.1.1.820.zip
+  489  unzip commandline-tools-linux-x64-5.1.1.820.zip
+  490  sudo apt update
+  491  sudo apt install unzip -y
+  492  unzip commandline-tools-linux-x64-5.1.1.820.zip
+  493  which unzip
+  494  # 应该是 /usr/bin/unzip
+  495  which unzip
+  496  unzip commandline-tools-linux-x64-5.1.1.820.zip
+  497  hash -r
+  498  unzip commandline-tools-linux-x64-5.1.1.820.zip
+  499  unzip commandline-tools-linux-x64-6.0.2.640.zip 
+  500  cd /mnt/d/Document/Download/commandline-tools-linux/commandline-tools-linux-x64-6.0.2.640/
+  501  ls
+  502  mv command-line-tools ~
+  503  echo $PATH
+  504  cd ~
+  505  clear
+  506  echo $PATH
+  507  ls
+  508  cd command-line-tools/
+  509  find . -name "libc++_static"
+  510  find . -name ".a"
+  511  find . -name *.a
+  512  find . -name libc++_static.a
+  513  nm -D ./sdk/default/openharmony/native/llvm/lib/aarch64-linux-ohos/c++/libc++_static.a | grep pthread
+  514  ls
+  515  cd bin/
+  516  ls
+  517  cd ../
+  518  cd sdk/
+  519  ls
+  520  cd default/
+  521  ls
+  522  cd openharmony/
+  523  ls
+  524  cd toolchains/
+  525  ls
+  526  cd -
+  527  cd ../../
+  528  cd ../
+  529  ls -al
+  530  cd bin/
+  531  ls
+  532  cd ohpm 
+  533  ls
+  534  cd -
+  535  ls
+  536  cd sdk/
+  537  ls
+  538  cd default/
+  539  ls
+  540  cd hms/
+  541  ls
+  542  cd native/
+  543  ls
+  544  cd build/
+  545  ls
+  546  ls -al
+  547  cd ../../
+  548  cd ../
+  549  cd ../
+  550  cd ../
+  551  cd ~/command-line-tools/sdk/default/openharmony/native/
+  552  export OHOS_SDK=~/command-line-tools/sdk/default/openharmony/native
+  553  echo $OHOS_SDK
+  554  llvm-addr2line -v
+  555  tree
+  556  tree | grep bin
+  557  ls -al
+  558  export LLVM_PATH=$OHOS_SDK/llvm/bin
+  559  echo $LLVM_PATH
+  560  cd build
+  561  ls
+  562  ls -al
+  563  cd ../
+  564  export CMAKE_PATH=$OHOS_SDK/build
+  565  cd build-tools/
+  566  ls
+  567  cd cmake/
+  568  ls
+  569  cd bin
+  570  ls
+  571  export CMAKE_PATH=$OHOS_SDK/build-tools/cmake/bin/
+  572  cmake -v
+  573  which cmake
+  574  cd ~
+  575  cat .bashrc 
+  576  echo $PATH
+  577  export PATH=$LLVM_APTH:$CMAKE_PATH:$PATH
+  578  echo $PATH
+  579  export PATH=$LLVM_PATH:$CMAKE_PATH:$PATH
+  580  echo $PATH
+  581  which cmake
+  582  llvm-addr2line -v
+  583  cd -
+  584  cd -
+  585  find . -name libc++_static.a
+  586  cd /mnt/d/
+  587  ls
+  588  cd CLionProjects/pthread_key_leak/
+  589  cmake -B build_ohos/     -DCMAKE_TOOLCHAIN_FILE=ohos.toolchain.cmake     -DOHOS_NDK_ROOT=$OHOS_SDK     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static && cmake --build build_ohos/ -j$(nproc)
+  590  cd -
+  591  cd -
+  592  cd ~
+  593  find . -name ohos.toolchain.cmake
+  594  export PATH=$OHOS_SDK/build/cmake/:$PATH
+  595  cd -
+  596  cmake -B build_ohos/     -DCMAKE_TOOLCHAIN_FILE=ohos.toolchain.cmake     -DOHOS_NDK_ROOT=$OHOS_SDK     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static && cmake --build build_ohos/ -j$(nproc)
+  597  echo $OHOS_SDK
+  598  which ninja
+  599  cmake -B build_ohos/     -DCMAKE_TOOLCHAIN_FILE=ohos.toolchain.cmake     -DOHOS_NDK_ROOT=$OHOS_SDK     -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK/build/cmake/ohos.toolchain.cmake     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static     -DCMAKE_MAKE_PROGRAM=ninja     -GNinja && cmake     --build  build_ohos     -j$(nproc)
+  600  cmake -B build_ohos/     -DCMAKE_TOOLCHAIN_FILE=ohos.toolchain.cmake     -DOHOS_NDK_ROOT=$OHOS_SDK     -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK/build/cmake/ohos.toolchain.cmake     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static     -DCMAKE_MAKE_PROGRAM=$OHOS_SDK/build-tools/cmake/bin/ninja     -GNinja && cmake     --build  build_ohos     -j$(nproc)
+  601  cmake -B build_ohos/     -DOHOS_NDK_ROOT=$OHOS_SDK     -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK/build/cmake/ohos.toolchain.cmake     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static     -DCMAKE_MAKE_PROGRAM=$OHOS_SDK/build-tools/cmake/bin/ninja     -GNinja && cmake     --build  build_ohos     -j$(nproc)
+  602  ls -al
+  603  rm -rf build_ohos/
+  604  cmake -B build_ohos/     -DOHOS_NDK_ROOT=$OHOS_SDK     -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK/build/cmake/ohos.toolchain.cmake     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static     -DCMAKE_MAKE_PROGRAM=$OHOS_SDK/build-tools/cmake/bin/ninja     -GNinja && cmake     --build  build_ohos     -j$(nproc)
+  605  # 查找 libc++ 头文件位置
+  606  find /root/command-line-tools/sdk/default/openharmony/native     -name "source_location" 2>/dev/null
+  607  # 查看 clang 版本
+  608  /root/command-line-tools/sdk/default/openharmony/native/llvm/bin/clang++ --version
+  609  # 查看 libc++ include 目录结构
+  610  ls /root/command-line-tools/sdk/default/openharmony/native/llvm/include/c++/v1/ 2>/dev/null | head -10
+  611  ls /root/command-line-tools/sdk/default/openharmony/native/sysroot/usr/include/c++/v1/ 2>/dev/null | head -10
+  612  find /root/command-line-tools/sdk/default/openharmony/native/llvm/include/c++/v1     -name "source_location" 2>/dev/null
+  613  find /root/command-line-tools/sdk/default/openharmony/native/sysroot     -name "source_location" 2>/dev/null
+  614  grep -n "__copy_cvref_t\|__copy_cvref_fn"     /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__type_traits.hpp     | head -10
+  615  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec log --oneline -3 2>/dev/null || cat /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/CMakeLists.txt | head -5
+  616  # 查找最后一个兼容 Clang 15 的 commit（在 __copy_cvref_t 改动之前）
+  617  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     log --oneline --all | head -30
+  618  # 找到引入这个语法的 commit
+  619  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     log --oneline --all --follow -p     -- include/stdexec/__detail/__type_traits.hpp     | grep -B5 "copy_cvref_fn" | head -20
+  620  chmod +x patch_stdexec_clang15.sh
+  621  bash patch_stdexec_clang15.sh     /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec
+  622  ls -al
+  623  ls -al
+  624  ls -al
+  625  chmod +x patch_stdexec_clang15.sh
+  626  bash patch_stdexec_clang15.sh     /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec
+  627  rm -rf /mnt/d/CLionProjects/pthread_key_leak/build_ohos/
+  628  cd /mnt/d/CLionProjects/pthread_key_leak
+  629  cmake -B build_ohos/     -DOHOS_NDK_ROOT=$OHOS_SDK     -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK/build/cmake/ohos.toolchain.cmake     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static     -DCMAKE_MAKE_PROGRAM=$OHOS_SDK/build-tools/cmake/bin/ninja     -GNinja && cmake     --build  build_ohos     -j$(nproc)
+  630  # 找到引入这些不兼容写法之前的最后一个 commit
+  631  # stdexec 在 2023 年中开始要求 Clang 16+
+  632  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     log --oneline --before="2023-06-01" | head -10
+  633  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     checkout 5e0b6a59
+  634  # 还原之前对 stdexec 的 patch（旧版本没有这些问题）
+  635  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     checkout include/stdexec/__detail/__meta.hpp               include/stdexec/__detail/__type_traits.hpp               include/stdexec/__detail/__config.hpp
+  636  # 确认旧版本里 __copy_cvref_t 的写法
+  637  grep -n "copy_cvref_t"     /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__type_traits.hpp
+  638  cd third_party/stdexec
+  639  git status
+  640  git add .
+  641  git stash
+  642  cd -
+  643  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     checkout 5e0b6a59
+  644  # 还原之前对 stdexec 的 patch（旧版本没有这些问题）
+  645  git -C /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec     checkout include/stdexec/__detail/__meta.hpp               include/stdexec/__detail/__type_traits.hpp               include/stdexec/__detail/__config.hpp
+  646  # 确认旧版本里 __copy_cvref_t 的写法
+  647  grep -n "copy_cvref_t"     /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__type_traits.hpp
+  648  # 先试试旧版有没有 source_location
+  649  grep -n "source_location"     /mnt/d/CLionProjects/pthread_key_leak/third_party/stdexec/include/stdexec/__detail/__meta.hpp
+  650  rm build_ohos/
+  651  rm -rf build_ohos/
+  652  cmake -B build_ohos/     -DOHOS_NDK_ROOT=$OHOS_SDK     -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK/build/cmake/ohos.toolchain.cmake     -DOHOS_ARCH=x86_64     -DOHOS_STL=c++_static     -DCMAKE_MAKE_PROGRAM=$OHOS_SDK/build-tools/cmake/bin/ninja     -GNinja && cmake     --build  build_ohos     -j$(nproc)
+  653  sed -i 's/stdexec::continues_on/stdexec::transfer/'     /mnt/d/CLionProjects/pthread_key_leak/plugin/plugin.cpp
+  654  cmake     --build  build_ohos     -j$(nproc)
+  655  cd build_ohos/
+  656  cd bin
+  657  ls
+  658  ./leak_checker 
+  659   ./leak_checker ./libleak_plugin.so 200 8
+  660  find /root/command-line-tools/sdk/default/openharmony/native     -name "libc++.a" -o -name "libc++_static.a" 2>/dev/null
+  661  # 同时看 x86_64-linux-ohos 的库目录结构
+  662  ls /root/command-line-tools/sdk/default/openharmony/native/llvm/lib/ | head -20
+  663  ls /root/command-line-tools/sdk/default/openharmony/native/llvm/lib/x86_64-linux-ohos/ 2>/dev/null | head -20
+  664  ls /root/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/x86_64-linux-ohos/ 2>/dev/null | head -20
+  665  nm -D libleak_plugin.so 
+  666  git add .
+  667  git status
+  668  git add ../../plugin/plugin.cpp
+  669  git commit -m "ohos"
+  670  git push
+  671  cd ../
+  672  cd ../
+  673  ls
+  674  vim compile_readme.md
+  675  git add .
+  676  git commit -m "ohos readme"
+  677  # 检查 NDK 的 x86_64-unknown-linux-gnu 库
+  678  ls /root/command-line-tools/sdk/default/openharmony/native/llvm/lib/x86_64-unknown-linux-gnu/
+  679  # 尝试编译本机测试程序
+  680  /root/command-line-tools/sdk/default/openharmony/native/llvm/bin/clang++     -stdlib=libc++     -nostdinc++     -I/root/command-line-tools/sdk/default/openharmony/native/llvm/include/c++/v1     -L/root/command-line-tools/sdk/default/openharmony/native/llvm/lib/x86_64-unknown-linux-gnu     -Wl,-rpath,/root/command-line-tools/sdk/default/openharmony/native/llvm/lib/x86_64-unknown-linux-gnu     -std=c++20 -o /tmp/test_clang     -x c++ - <<< '#include <cstdio>
+int main(){ printf("NDK clang OK\n"); }' && /tmp/test_clang
+  681  find /root/command-line-tools/sdk/default/openharmony/native     -name "__config_site" 2>/dev/null
+  682  NDK=/root/command-line-tools/sdk/default/openharmony/native
+  683  /root/command-line-tools/sdk/default/openharmony/native/llvm/bin/clang++     -stdlib=libc++     -nostdinc++     -I${NDK}/llvm/include/x86_64-unknown-linux-gnu/c++/v1     -I${NDK}/llvm/include/c++/v1     -L${NDK}/llvm/lib/x86_64-unknown-linux-gnu     -Wl,-rpath,${NDK}/llvm/lib/x86_64-unknown-linux-gnu     -std=c++20 -o /tmp/test_clang     -x c++ - <<< '#include <cstdio>
+int main(){ printf("NDK clang OK\n"); }' && /tmp/test_clang
+  684  cmake -B build_native_sim/     -DCMAKE_TOOLCHAIN_FILE=linux_native.toolchain.cmake && cmake --build build_native_sim/ -j$(nproc)
+  685  # 验证符号（应和 OHOS 版一致）
+  686  nm -D build_native_sim/bin/libleak_plugin.so | grep pthread_key
+  687  cd build_native_sim/bin/
+  688   ./leak_checker ./libleak_plugin.so 200 8
+  689   ./leak_checker ./libleak_plugin.so 200 8
+  690   ./leak_checker ./libleak_plugin.so 1000 8
+  691   ./leak_checker ./libleak_plugin.so 200 8
+  692  git status
+  693  git add ../../abort.jpg ../../leak.jpg   ../../linux_native.toolchain.cmake
+  694  git commit -m "leak renew"
+  695  git add .
+  696  git commit -m "execute"
+  697   ./leak_checker ./libleak_plugin.so 1000 8
+  698  cd -
+  699  ls -al
+  700  git add compile_readme.md
+  701  git status
+  702  history
+  703  history > history_compile_record
