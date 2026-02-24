@@ -1,0 +1,5 @@
+# ninja log v6
+358	2211	1771945572413328300	main/CMakeFiles/main_app.dir/main.cpp.o	2eb5eb1c2dd0a901
+2400	3257	1771945574452994600	bin/leak_checker	34f20ee50ba6e6d0
+343	3230	1771945669499584100	plugin/CMakeFiles/plugin.dir/plugin.cpp.o	db36b5152073706
+3244	4320	1771945672399952000	bin/libleak_plugin.so	e1ec09ee38db03c8
