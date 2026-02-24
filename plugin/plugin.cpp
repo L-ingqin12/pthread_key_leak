@@ -63,7 +63,7 @@ int run_plugin(int task_count)
 #endif
         auto pipeline =
             stdexec::just()
-            | stdexec::continues_on(sched)
+            | stdexec::transfer(sched)
             | stdexec::bulk(
                 static_cast<std::size_t>(task_count),
                 [&](std::size_t idx) noexcept {
