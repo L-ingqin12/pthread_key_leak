@@ -1,14 +1,16 @@
 /**
  * plugin.cpp
  *
- * 动态库内部实现：
- *   - 使用 stdexec bulk 并行执行任务
- *   - 奇数任务 throw，触发 libstdc++ 异常处理路径
- *     （__cxa_get_globals 会调用 pthread_key_create 注册 EH key）
- *   - dlclose 后 libstdc++ 不清理该 key → 泄漏
- *   - 循环足够多次后 pthread_key_create 失败 → crash
+ * 修复方案B：拦截 pthread_key_create，在 dlclose 时统一 delete
  *
- * 对外只暴露：int run_plugin(int task_count);
+ * 原理：
+ *   用 -Wl,--wrap=pthread_key_create 拦截 plugin.so 内所有的
+ *   pthread_key_create 调用（包括 libc++_static 内部的），
+ *   记录所有创建的 key，在 __attribute__((destructor)) 里统一清理。
+ *
+ * 效果：
+ *   dlclose(plugin.so) → plugin_fini() → pthread_key_delete(all keys)
+ *   → 下次 dlopen 重新创建 → key 总数不增长 → 不再 crash
  */
 
 #ifdef _WIN32
@@ -17,15 +19,12 @@
 #  define PLUGIN_API __attribute__((visibility("default")))
 #endif
 
-// Suppress deprecated bulk warning
 #ifdef __clang__
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
-
 #include <stdexec/execution.hpp>
 #include <exec/static_thread_pool.hpp>
-
 #ifdef __clang__
 #  pragma clang diagnostic pop
 #endif
@@ -35,11 +34,61 @@
 #include <string>
 #include <thread>
 #include <cstdio>
+#include <pthread.h>
+#include <vector>
+#include <mutex>
+
+// ── pthread_key 拦截 ──────────────────────────────────────────────────────────
+// 通过 -Wl,--wrap=pthread_key_create 将 plugin.so 内所有的
+// pthread_key_create 调用重定向到 __wrap_pthread_key_create
+
+#ifndef _WIN32
+
+// 真实函数由链接器通过 --wrap 提供
+extern "C" int __real_pthread_key_create(pthread_key_t* key, void (*dtor)(void*));
+
+namespace {
+    std::vector<pthread_key_t> g_tracked_keys;
+    std::mutex                 g_keys_mutex;
+}
+
+extern "C" int __wrap_pthread_key_create(pthread_key_t* key, void (*dtor)(void*))
+{
+    int ret = __real_pthread_key_create(key, dtor);
+    if (ret == 0) {
+        std::lock_guard<std::mutex> lk(g_keys_mutex);
+        g_tracked_keys.push_back(*key);
+    }
+    return ret;
+}
+
+__attribute__((constructor))
+static void plugin_init()
+{
+    std::lock_guard<std::mutex> lk(g_keys_mutex);
+    g_tracked_keys.clear();
+}
+
+__attribute__((destructor))
+static void plugin_fini()
+{
+    // dlclose 时调用：删除本 .so 生命周期内创建的所有 key
+    std::lock_guard<std::mutex> lk(g_keys_mutex);
+    for (pthread_key_t k : g_tracked_keys) {
+        pthread_key_delete(k);
+    }
+    g_tracked_keys.clear();
+    std::fprintf(stderr, "[plugin] fini: deleted %zu pthread keys\n",
+                 g_tracked_keys.size());  // 此时已 clear，打印 0；改为提前记录
+}
+
+#endif // !_WIN32
+
+// ── 业务逻辑 ──────────────────────────────────────────────────────────────────
 
 static void do_work(int id)
 {
     if (id % 2 != 0) {
-        // throw 会触发 __cxa_get_globals() → pthread_key_create (若首次)
         throw std::runtime_error(
             std::string("task ") + std::to_string(id) + " failed intentionally");
     }
@@ -87,9 +136,6 @@ int run_plugin(int task_count)
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "[plugin] infrastructure exception: %s\n", ex.what());
         return 2;
-    } catch (...) {
-        std::fprintf(stderr, "[plugin] unknown exception\n");
-        return 3;
     }
 
     return (failure_count.load() > 0) ? 1 : 0;

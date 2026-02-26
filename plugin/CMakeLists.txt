@@ -35,6 +35,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "OHOS")
         )
 
     else() # static - 复现泄漏
+        message("ohos -static in")
         target_link_libraries(plugin PRIVATE
                 -Wl,--push-state,-Bstatic
                 ${_ndk_lib}/libc++_static.a
@@ -60,6 +61,7 @@ elseif(UNIX AND NOT APPLE)
     elseif(PLUGIN_LINK_MODE STREQUAL "shared")
         target_link_libraries(plugin PRIVATE stdc++)
     else()
+        message("unix -static in")
         target_link_options(plugin PRIVATE
                 -static-libstdc++ -static-libgcc
                 -Wl,--exclude-libs,libstdc++.a,libgcc.a

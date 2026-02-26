@@ -1,6 +1,7 @@
 {
   global:
   run_plugin;
+  __wrap_pthread_key_create;
   local:
   *;
 };
