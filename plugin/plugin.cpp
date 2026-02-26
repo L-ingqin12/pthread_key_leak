@@ -77,9 +77,10 @@ static void plugin_fini()
     for (pthread_key_t k : g_tracked_keys) {
         pthread_key_delete(k);
     }
-    g_tracked_keys.clear();
     std::fprintf(stderr, "[plugin] fini: deleted %zu pthread keys\n",
-                 g_tracked_keys.size());  // 此时已 clear，打印 0；改为提前记录
+             g_tracked_keys.size());  // 此时已 clear，打印 0；改为提前记录
+    g_tracked_keys.clear();
+
 }
 
 #endif // !_WIN32
